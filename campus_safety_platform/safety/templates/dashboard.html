@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Campus Safety Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <h1>Campus Safety Live Dashboard</h1>
+
+    <!-- Plot containers -->
+    <div id="safety-report-plot" style="width:100%;height:400px;"></div>
+    <div id="route-plot" style="width:100%;height:400px;"></div>
+    <div id="loadshedding-plot" style="width:100%;height:400px;"></div>
+
+    <script>
+        // Initialize plots with empty data
+        Plotly.newPlot('safety-report-plot', [{
+            x: [], y: [], mode: 'lines+markers', name: 'Safety Reports'
+        }]);
+
+        Plotly.newPlot('route-plot', [{
+            x: [], y: [], mode: 'lines+markers', name: 'Routes'
+        }]);
+
+        Plotly.newPlot('loadshedding-plot', [{
+            x: [], y: [], mode: 'lines+markers', name: 'Loadshedding'
+        }]);
+
+        // Open WebSocket connection
+        const socket = new WebSocket(
+            'ws://' + window.location.host + '/ws/safety/'
+        );
+
+        socket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            console.log("Received update:", data);
+
+            const timestamp = new Date(data.timestamp || Date.now());
+            
+            // Update Safety Report plot
+            if(data.category === 'safety' && data.value !== undefined){
+                Plotly.extendTraces('safety-report-plot', {
+                    x: [[timestamp]],
+                    y: [[data.value]]
+                }, [0]);
+            }
+
+            // Update Route plot
+            if(data.category === 'route' && data.value !== undefined){
+                Plotly.extendTraces('route-plot', {
+                    x: [[timestamp]],
+                    y: [[data.value]]
+                }, [0]);
+            }
+
+            // Update Loadshedding plot
+            if(data.category === 'loadshedding' && data.value !== undefined){
+                Plotly.extendTraces('loadshedding-plot', {
+                    x: [[timestamp]],
+                    y: [[data.value]]
+                }, [0]);
+            }
+        };
+
+        socket.onopen = function() {
+            console.log("WebSocket connected!");
+        };
+
+        socket.onclose = function() {
+            console.log("WebSocket disconnected.");
+        };
+    </script>
+</body>
+</html>

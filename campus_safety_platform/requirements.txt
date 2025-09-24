@@ -1,0 +1,11 @@
+Django==5.0
+djangorestframework
+channels==4.1.0        # Django Channels for WebSocket support
+daphne==4.0.0         # ASGI server for Django Channels
+channels-redis
+psycopg2-binary
+kafka-python
+plotly
+pandas
+numpy
+dj-database-url
