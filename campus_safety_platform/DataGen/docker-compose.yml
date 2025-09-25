@@ -37,6 +37,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # init SQL (runs only on first container start)
     restart: unless-stopped
 
   redis:
@@ -46,40 +47,44 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
-  django:
+  app:
     build: .
     container_name: campus_safety_app
     volumes:
       - .:/app
-    ports:
-      - "8000:8000"
+    environment:
+      # Consumer and Django (if you run it) will read DATABASE_URL
+      DATABASE_URL: "postgres://postgres:Mahlatsi%230310@postgres:5432/campus_safety"
+      # optional debug key
+      SECRET_KEY: "supersecretkey"
+      DEBUG: "1"
     depends_on:
       - postgres
-      - redis
       - kafka
-    environment:
-      DATABASE_URL: postgres://postgres:Mahlatsi%230310@postgres:5432/campus_safety
-      SECRET_KEY: supersecretkey
-      DEBUG: '1'
+      - redis
     restart: unless-stopped
 
   producer:
-    build: .
+    image: campus_safety_app   # uses same built image
     container_name: campus_safety_producer
-    command: python producer.py
+    command: ["python", "producer.py"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
     depends_on:
       - kafka
     restart: unless-stopped
 
   consumer:
-    build: .
+    image: campus_safety_app
     container_name: campus_safety_consumer
-    command: python consumer.py
+    command: ["python", "consumer.py"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:9092"
+      DATABASE_URL: "postgres://postgres:Mahlatsi%230310@postgres:5432/campus_safety"
     depends_on:
       - kafka
       - postgres
     restart: unless-stopped
-
 
 volumes:
   pgdata:
