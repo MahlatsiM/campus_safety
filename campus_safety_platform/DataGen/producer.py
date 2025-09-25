@@ -1,50 +1,56 @@
-# producer.py
-import os
 from kafka import KafkaProducer
 import json, time, random
 from datetime import datetime, timedelta
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-
 producer = KafkaProducer(
-    bootstrap_servers=KAFKA_BOOTSTRAP,
+    bootstrap_servers='localhost:29092',
     value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
 
-locations = [
-    {"name": "North Campus", "lat": -28.7383, "lon": 24.7635},
-    {"name": "South Campus", "lat": -28.7414, "lon": 24.7702},
-    {"name": "City Residence", "lat": -28.7402, "lon": 24.7715},
-    {"name": "Student Village", "lat": -28.7431, "lon": 24.7668}
+# ---------------------------
+# Spatial bounds (Kimberley campus square)
+# ---------------------------
+LAT_MIN, LAT_MAX = -28.764947, -28.723893
+LON_MIN, LON_MAX = 24.722326, 24.794456
+
+incident_types = ["theft", "harassment", "suspicious_activity", "accident"]
+
+# ---------------------------
+# Fixed patrol routes
+# ---------------------------
+routes = [
+    {"origin": (-28.747768, 24.765804), "destination": (-28.743639, 24.762616)},
+    {"origin": (-28.748184, 24.765766), "destination": (-28.748115, 24.758987)},
+    {"origin": (-28.752487, 24.763112), "destination": (-28.746789, 24.762963)},
+    {"origin": (-28.747846, 24.766240), "destination": (-28.744543, 24.771700)},
+    {"origin": (-28.747020, 24.766517), "destination": (-28.742686, 24.768342)},
+    {"origin": (-28.751240, 24.763011), "destination": (-28.752531, 24.755070)},
 ]
 
-incident_types = ["theft", "harassment", "suspicious_activity", "accident", "other"]
-
+# ---------------------------
+# Generators
+# ---------------------------
 def generate_safety_report():
-    loc = random.choice(locations)
     return {
         "reporter": f"user{random.randint(1,100)}",
         "category": random.choice(incident_types),
         "description": "Synthetic safety event",
-        "lat": loc["lat"] + random.uniform(-0.001, 0.001),
-        "lon": loc["lon"] + random.uniform(-0.001, 0.001),
+        "lat": random.uniform(LAT_MIN, LAT_MAX),
+        "lon": random.uniform(LON_MIN, LON_MAX),
         "timestamp": datetime.utcnow().isoformat()
     }
 
 def generate_route():
-    start, end = random.sample(locations, 2)
+    r = random.choice(routes)
     return {
-        "origin": start["name"],
-        "destination": end["name"],
-        # store coords as JSON-ish string so consumer can insert safely
-        "origin_coords": f"({start['lat']}, {start['lon']})",
-        "destination_coords": f"({end['lat']}, {end['lon']})",
+        "origin": str(r["origin"]),
+        "destination": str(r["destination"]),
         "risk_score": round(random.uniform(0, 1), 2),
         "timestamp": datetime.utcnow().isoformat()
     }
 
 def generate_loadshedding():
-    area = random.choice([loc["name"] for loc in locations])
+    area = random.choice([f"Zone-{i}" for i in range(1, 6)])
     stage = random.randint(1, 6)
     start = datetime.utcnow()
     end = start + timedelta(hours=2)
@@ -55,24 +61,16 @@ def generate_loadshedding():
         "end_time": end.isoformat()
     }
 
+# ---------------------------
+# Main streaming loop
+# ---------------------------
 if __name__ == "__main__":
-    print("Streaming synthetic campus safety data to Kafka...")
+    print("Streaming synthetic campus safety data...")
     try:
         while True:
-            sr = generate_safety_report()
-            producer.send("safety-reports-topic", value=sr)
-            print("Sent safety report:", sr)
-
-            route = generate_route()
-            producer.send("routes-topic", value=route)
-            print("Sent route:", route)
-
-            ls = generate_loadshedding()
-            producer.send("loadshedding-topic", value=ls)
-            print("Sent loadshedding:", ls)
-
-            # flush occasionally
-            producer.flush()
+            producer.send("safety-reports-topic", value=generate_safety_report())
+            producer.send("routes-topic", value=generate_route())
+            producer.send("loadshedding-topic", value=generate_loadshedding())
             time.sleep(random.uniform(1, 5))
     except KeyboardInterrupt:
         print("Producer stopped.")
