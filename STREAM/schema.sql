@@ -9,6 +9,26 @@ CREATE TABLE IF NOT EXISTS safety_reports (
     timestamp TIMESTAMP
 );
 
+CREATE TABLE safe_routes (
+    id SERIAL PRIMARY KEY,
+    origin VARCHAR(255),
+    destination VARCHAR(255),
+    origin_coords TEXT,       -- store as tuple "(lat, lon)"
+    destination_coords TEXT,
+    risk_score FLOAT,
+    timestamp TIMESTAMP
+);
+
+CREATE TABLE green_areas (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    lat FLOAT,
+    lon FLOAT,
+    radius_m FLOAT,          -- radius to define “safe zone” around the point
+    type VARCHAR(50)         -- campus, police station, hospital
+);
+
+
 -- Routes safety score
 CREATE TABLE IF NOT EXISTS safe_routes (
     route_id SERIAL PRIMARY KEY,

@@ -1,6 +1,7 @@
 from kafka import KafkaConsumer
 import json, psycopg2
 
+# Connect to PostgreSQL
 conn = psycopg2.connect(
     dbname="campus_safety",
     user="postgres",
@@ -10,11 +11,12 @@ conn = psycopg2.connect(
 )
 cursor = conn.cursor()
 
-# Create tables
-cursor.execute(open("schema.sql", "r").read())
+# Create tables from schema
+with open("schema.sql", "r", encoding="utf-8") as f:
+    cursor.execute(f.read())
 conn.commit()
 
-# Define queries and fields
+# Insert queries
 queries = {
     "safety-reports-topic": (
         "INSERT INTO safety_reports (reporter, category, description, lat, lon, timestamp) VALUES (%s,%s,%s,%s,%s,%s)",
@@ -27,12 +29,16 @@ queries = {
     "loadshedding-topic": (
         "INSERT INTO loadshedding (area,stage,start_time,end_time) VALUES (%s,%s,%s,%s)",
         ["area","stage","start_time","end_time"]
+    ),
+    "green-areas-topic": (
+        "INSERT INTO green_areas (name, lat, lon, radius_m) VALUES (%s,%s,%s,%s)",
+        ["name","lat","lon","radius_m"]
     )
 }
 
-# Subscribe to all topics at once
+# Kafka consumer
 consumer = KafkaConsumer(
-    *queries.keys(),  # subscribe to all topics
+    *queries.keys(),
     bootstrap_servers='localhost:29092',
     auto_offset_reset='earliest',
     value_deserializer=lambda m: json.loads(m.decode('utf-8'))
@@ -45,9 +51,13 @@ try:
         topic = msg.topic
         data = msg.value
         insert_query, fields = queries[topic]
-        cursor.execute(insert_query, tuple(data[f] for f in fields))
-        conn.commit()
-        print(f"Inserted into {topic}: {data}")
+        try:
+            cursor.execute(insert_query, tuple(data[f] for f in fields))
+            conn.commit()
+            print(f"Inserted into {topic}: {data}")
+        except Exception as e:
+            conn.rollback()
+            print(f"Failed to insert into {topic}: {e}, data: {data}")
 
 except KeyboardInterrupt:
     print("Consumer stopped.")
