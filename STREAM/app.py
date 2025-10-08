@@ -125,7 +125,7 @@ if st.session_state.get("authentication_status"):
     # -----------------------------------
     # Introduction
     # -----------------------------------
-    with st.expander("ℹ️ About This Platform", expanded=False):
+    with st.expander("ℹ️ About This Platform", expanded=True):
         st.markdown(
         """
         This Campus Safety and Reporting Platform is designed to give students a secure and accessible way to:
@@ -323,9 +323,10 @@ if st.session_state.get("authentication_status"):
     # Report Submission Form
     # -----------------------------------
     st.subheader("📝 Submit a New Safety Report")
-    
-    # Check daily limit first
+
     user_id = st.session_state.get("user_id")
+
+    # Check daily limit
     try:
         result = run_query(
             """
@@ -336,42 +337,23 @@ if st.session_state.get("authentication_status"):
             (user_id, date.today())
         )
         today_count = result[0][0] if result else 0
-        
         st.info(f"📊 Reports submitted today: **{today_count}/3**")
-        
+
         if today_count >= 3:
             st.warning("⚠️ You have reached the maximum of 3 reports for today. Please try again tomorrow.")
         else:
-            with st.form("report_form", clear_on_submit=True):
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    report_type = st.selectbox(
-                        "Report Type",
-                        ["Hazard", "Theft", "Suspicious Activity", "Assault", "Vandalism", "Other"],
-                        help="Select the type of incident you want to report"
-                    )
-                    description = st.text_area(
-                        "Description",
-                        placeholder="Please provide details about the incident...",
-                        height=150,
-                        help="Be as specific as possible"
-                    )
-                
-                with col2:
-                    st.markdown("**Location Information**")
-                    st.caption("Search for a location on campus")
-
-                # Location input with live Geoapify suggestions
+            with st.form("location_form"):
+                st.markdown("**Step 1: Search & Confirm Location**")
                 location_input = st.text_input(
                     "📍 Enter location name",
                     placeholder="Start typing a location...",
                     help="Type a location name to see suggestions"
                 )
-                
+
                 latitude = None
                 longitude = None
                 selected_location = None
+                location_confirmed = False
 
                 if location_input:
                     try:
@@ -384,12 +366,11 @@ if st.session_state.get("authentication_status"):
                         if results:
                             options = [r['properties']['formatted'] for r in results]
                             selected_location = st.selectbox("📌 Select a location", options)
-                            
+
                             for r in results:
                                 if r['properties']['formatted'] == selected_location:
                                     latitude = r['properties']['lat']
                                     longitude = r['properties']['lon']
-                                    st.success(f"✅ Location: {selected_location}")
                                     st.caption(f"Coordinates: {latitude:.6f}, {longitude:.6f}")
                                     break
                         else:
@@ -399,33 +380,69 @@ if st.session_state.get("authentication_status"):
                     except Exception as e:
                         st.error(f"❌ Error fetching location: {str(e)}")
 
-                submit_btn = st.form_submit_button("🚨 Submit Report", use_container_width=True, type="primary")
+                confirm_btn = st.form_submit_button("✅ Confirm Location")
+                if confirm_btn and selected_location:
+                    location_confirmed = True
+                    st.session_state['latitude'] = latitude
+                    st.session_state['longitude'] = longitude
+                    st.session_state['selected_location'] = selected_location
+                    st.success(f"Location confirmed: {selected_location}")
 
             # -----------------------------------
-            # Submission logic
+            # Step 2: Submit report form (enabled only if location confirmed)
             # -----------------------------------
-            if submit_btn:
-                if not user_id:
-                    st.error("❌ User ID not found. Please log in again.")
-                elif not (report_type and description and latitude and longitude):
-                    st.error("⚠️ Please fill in all fields and select a location before submitting.")
-                else:
-                    try:
-                        run_query(
-                            """
-                            INSERT INTO safety_reports (user_id, report_type, description, latitude, longitude, created_at)
-                            VALUES (%s, %s, %s, %s, %s, NOW())
-                            """,
-                            (user_id, report_type, description, latitude, longitude),
-                            fetch=False
+            if location_confirmed or ('latitude' in st.session_state and 'longitude' in st.session_state):
+                with st.form("report_form", clear_on_submit=True):
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        report_type = st.selectbox(
+                            "Report Type",
+                            ["Hazard", "Theft", "Suspicious Activity", "Assault", "Vandalism", "Other"],
+                            help="Select the type of incident you want to report"
                         )
-                        st.success("✅ Report submitted successfully! Thank you for keeping our campus safe.")
-                        st.balloons()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to submit report: {e}")
+                        description = st.text_area(
+                            "Description",
+                            placeholder="Please provide details about the incident...",
+                            height=150,
+                            help="Be as specific as possible"
+                        )
+                    with col2:
+                        st.markdown("**Location Information**")
+                        st.caption(f"Confirmed location: {st.session_state['selected_location']}")
+                        st.caption(f"Coordinates: {st.session_state['latitude']:.6f}, {st.session_state['longitude']:.6f}")
+
+                    submit_btn = st.form_submit_button("🚨 Submit Report", use_container_width=True)
+
+                if submit_btn:
+                    if not user_id:
+                        st.error("❌ User ID not found. Please log in again.")
+                    elif not (report_type and description):
+                        st.error("⚠️ Please fill in all fields before submitting.")
+                    else:
+                        try:
+                            run_query(
+                                """
+                                INSERT INTO safety_reports (user_id, report_type, description, latitude, longitude, created_at)
+                                VALUES (%s, %s, %s, %s, %s, NOW())
+                                """,
+                                (
+                                    user_id,
+                                    report_type,
+                                    description,
+                                    st.session_state['latitude'],
+                                    st.session_state['longitude']
+                                ),
+                                fetch=False
+                            )
+                            st.success("✅ Report submitted successfully! Thank you for keeping our campus safe.")
+                            st.balloons()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Failed to submit report: {e}")
+
     except Exception as e:
         st.error(f"Error checking report limit: {e}")
+
 
 else:
     # Not authenticated - show welcome screen
@@ -484,14 +501,15 @@ else:
     with st.expander("🆘 Emergency Contacts", expanded=False):
         st.markdown("""
         ### Campus Security
-        - **Emergency Hotline**: 📞 123-456-7890
-        - **Security Office**: 📞 123-456-7891
-        - **Email**: security@campus.edu
+        - **Control Room**: 📞 053 491 0911
+        - **Client Service Centre**: 📞 053 491 0365
         
         ### Other Emergency Services
-        - **Police**: 📞 10111
-        - **Ambulance**: 📞 10177
-        - **Fire Department**: 📞 10111
+        - **Police (SAPS)**: 📞 10111
+        - **Crime Stop (Anonymous Reporting)**: 📞 08600 10111
+        - **Ambulance (ER24)**: 📞 084 124
+        - **Ambulance (Public)**: 📞 10177 / 053 802 9111
+        - **Fire Brigade**: 📞 053 832 4211
         """)
     
     # Tips for staying safe

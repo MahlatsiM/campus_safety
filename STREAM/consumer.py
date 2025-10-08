@@ -1,74 +1,105 @@
-from kafka import KafkaConsumer
 import json
 import psycopg2
+from kafka import KafkaConsumer
 from datetime import datetime
 
+# =========================
+# Kafka setup
+# =========================
+consumer = KafkaConsumer(
+    'users-topic',
+    'safety-reports-topic',
+    bootstrap_servers='localhost:29092',
+    value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+    auto_offset_reset='earliest',
+    enable_auto_commit=True,
+    group_id='campus-safety-consumer'
+)
+
+# =========================
 # PostgreSQL connection
+# =========================
 conn = psycopg2.connect(
-    dbname="campus_safety",
-    user="postgres",
-    password="Mahlatsi#0310",
-    host="localhost",
-    port="5432"
+    host='localhost',
+    port=5432,
+    database='campus_safety',
+    user='postgres',
+    password='Mahlatsi#0310'
 )
 cursor = conn.cursor()
 
-# Create tables from schema if needed
-with open("schema.sql", "r", encoding="utf-8") as f:
-    cursor.execute(f.read())
-conn.commit()
+# =========================
+# Helper functions
+# =========================
+def insert_user(user):
+    """Insert a user into the users table, ignoring duplicates."""
+    query = """
+    INSERT INTO users (
+        user_id, username, email, first_name, last_name,
+        hashed_password, is_admin, created_at, last_seen
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (user_id) DO NOTHING;
+    """
+    try:
+        cursor.execute(query, (
+            user['user_id'],
+            user['username'],
+            user['email'],
+            user['first_name'],
+            user['last_name'],
+            user['hashed_password'],
+            user['is_admin'],
+            user['created_at'],
+            user['last_seen']
+        ))
+        conn.commit()
+        print(f"🧑‍🎓 Inserted user: {user['username']}")
+    except Exception as e:
+        print(f"❌ Failed to insert user {user.get('username')}: {e}")
+        conn.rollback()
 
-# Mapping topics to insert statements and fields
-queries = {
-    "users-topic": (
-        "INSERT INTO users (user_id, session_cookie, created_at, last_seen) "
-        "VALUES (%s,%s,%s,%s) "
-        "ON CONFLICT (user_id) DO UPDATE SET "
-        "session_cookie = EXCLUDED.session_cookie, last_seen = EXCLUDED.last_seen",
-        ["user_id", "session_cookie", "created_at", "last_seen"]
-    ),
-    "safety-reports-topic": (
-        "INSERT INTO safety_reports (user_id, report_type, description, latitude, longitude, created_at) "
-        "VALUES (%s,%s,%s,%s,%s,%s)",
-        ["user_id","report_type","description","latitude","longitude","created_at"]
-    )
-}
+def insert_report(report):
+    """Insert a report into the safety_reports table."""
+    query = """
+    INSERT INTO safety_reports (
+        user_id, report_type, description, latitude, longitude, created_at
+    ) VALUES (%s, %s, %s, %s, %s, %s);
+    """
+    try:
+        # Ensure user_id is string to match the user table
+        user_id_str = str(report['user_id'])
+        cursor.execute(query, (
+            user_id_str,
+            report['report_type'],
+            report['description'],
+            report['latitude'],
+            report['longitude'],
+            report['created_at']
+        ))
+        conn.commit()
+        print(f"📍 Inserted report from user {user_id_str}")
+    except Exception as e:
+        print(f"❌ Failed to insert report from user {report.get('user_id')}: {e}")
+        conn.rollback()
 
-# Kafka consumer
-consumer = KafkaConsumer(
-    *queries.keys(),
-    bootstrap_servers='localhost:29092',  # match producer
-    group_id="campus_safety_consumer",
-    auto_offset_reset='earliest',
-    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-)
-
-print("Consuming from topics:", list(queries.keys()))
-
+# =========================
+# Main consumption loop
+# =========================
 try:
-    for msg in consumer:
-        topic = msg.topic
-        data = msg.value
-        print(f"Received from Kafka [{topic}]: {data}")  # debug
+    print("🚀 Consumer started. Listening to Kafka topics...")
+    for message in consumer:
+        topic = message.topic
+        data = message.value
 
-        insert_query, fields = queries[topic]
-        try:
-            row_values = []
-            for f in fields:
-                val = data.get(f)
-                if isinstance(val, str) and f in ("created_at", "last_seen"):
-                    val = datetime.fromisoformat(val)
-                row_values.append(val)
-
-            cursor.execute(insert_query, tuple(row_values))
-            conn.commit()
-            print(f"Inserted into {topic}: {data}")
-        except Exception as e:
-            conn.rollback()
-            print(f"Failed to insert into {topic}: {e}, data: {data}")
+        if topic == 'users-topic':
+            insert_user(data)
+        elif topic == 'safety-reports-topic':
+            insert_report(data)
 
 except KeyboardInterrupt:
-    print("Consumer stopped.")
+    print("\n🛑 Consumer stopped by user.")
+
 finally:
     cursor.close()
     conn.close()
+    print("✅ PostgreSQL connection closed.")
